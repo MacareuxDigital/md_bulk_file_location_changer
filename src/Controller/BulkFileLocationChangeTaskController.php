@@ -12,6 +12,9 @@ use Concrete\Core\Command\Task\Runner\BatchProcessTaskRunner;
 use Concrete\Core\Command\Task\Runner\TaskRunnerInterface;
 use Concrete\Core\Command\Task\TaskInterface;
 use Concrete\Core\Database\Connection\Connection;
+use Concrete\Core\File\Command\ChangeFileStorageLocationCommand;
+use Concrete\Core\File\Command\ChangeFileStorageLocationCommandHandler;
+use Concrete\Core\File\StorageLocation\StorageLocationFactory;
 use Concrete\Core\Support\Facade\Application;
 
 class BulkFileLocationChangeTaskController extends AbstractController
@@ -29,8 +32,24 @@ class BulkFileLocationChangeTaskController extends AbstractController
     public function getInputDefinition(): ?Definition
     {
         $definition = new Definition();
-        // @todo: Add required select field for source storage location
-        // @todo: Add required select field for destination storage location
+        $locationSet = [];
+        foreach (app()->make(StorageLocationFactory::class)->fetchList() as $location) {
+            $locationSet[$location->getID()] = $location->getName();
+        }
+        $definition->addField(new SelectField(
+            'sourceStorageLocationID',
+            t('Source Storage Location'),
+            t('Select the source storage location.'),
+            $locationSet,
+            true
+        ));
+        $definition->addField(new SelectField(
+            'destinationStorageLocationID',
+            t('Destination Storage Location'),
+            t('Select the destination storage location.'),
+            $locationSet,
+            true
+        ));
         $definition->addField(new Field(
             'limit',
             t('Limit'),
@@ -44,18 +63,24 @@ class BulkFileLocationChangeTaskController extends AbstractController
     public function getTaskRunner(TaskInterface $task, InputInterface $input): TaskRunnerInterface
     {
         $limit = (int)$input->getField('limit')?->getValue() ?: 100;
-        // @todo: Get source storage location ID from input
-        // @todo: Get destination storage location ID from input
+        $sourceStorageLocationID = $input->getField('sourceStorageLocationID')->getValue();
+        $destinationStorageLocationID = $input->getField('destinationStorageLocationID')->getValue();
 
         $app = Application::getFacadeApplication();
         /** @var Connection $connection */
         $connection = $app->make(Connection::class);
         $qb = $connection->createQueryBuilder();
-        // @todo: Get file IDs from source storage location
-
+        $files = $qb->select('fID')
+            ->from('Files')
+            ->where('fslID = :fslID')
+            ->setParameter('fslID', $sourceStorageLocationID)
+            ->setMaxResults($limit)
+            ->execute()
+            ->fetchAllAssociative();
         $batch = Batch::create();
-        // @todo: Add \Concrete\Core\File\Command\ChangeFileStorageLocationCommand to batch
-
+        foreach ($files as $file) {
+            $batch->add(new ChangeFileStorageLocationCommand($destinationStorageLocationID, $file['fID']));
+        }
         return new BatchProcessTaskRunner($task, $batch, $input, t('Batch process started...'));
     }
 }
